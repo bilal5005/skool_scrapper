@@ -1,26 +1,19 @@
 /**
  * youtube.js
  * ----------
- * Placeholder handler for YouTube embedded players.
- * Phase 1: Only logs the detection — no playback or download logic.
+ * Handler for YouTube players. Phase 1: styled console output only.
  *
  * Exposed globals:
- *   - handleYouTube(fileName)  → void
+ *   window.__SkoolAutomation.handleYouTube(fileName, link)
  */
 
 (() => {
   "use strict";
 
-  /**
-   * Handle a detected YouTube player.
-   *
-   * @param {string} fileName - The formatted target file name
-   *                            (e.g. "Hermes_Lesson_3").
-   */
-  function handleYouTube(fileName) {
-    console.log(
-      `[Detected] Player Type: YouTube | Target File Name: ${fileName}`
-    );
+  function handleYouTube(fileName, link) {
+    console.clear();
+    console.log('%cPlayer = YouTube', 'color: #ff0000; font-size: 20px; font-weight: bold;');
+    console.log('%cLink = ' + link,   'color: #2196F3; font-size: 16px; font-weight: bold;');
   }
 
   window.__SkoolAutomation = window.__SkoolAutomation || {};

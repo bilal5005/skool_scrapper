@@ -3,24 +3,16 @@
  * ----------
  * Main orchestrator for the Skool Video Automation extension.
  *
- * Responsibilities:
- *   1. Inject a floating "Run Automation" button into the page.
- *   2. Prompt the user for a file prefix and number of pages.
- *   3. Loop N times: detect player → route to handler → navigate via sidebar.
+ * Loop: detect player → route to styled handler → navigate via sidebar.
  *
- * Navigation uses Skool's sidebar lesson list (not generic "Next" text),
- * matching the proven approach from the original monolithic script.
+ * IMPORTANT: window.__SkoolAutomation is looked up lazily (inside each
+ * async call) rather than captured once at IIFE load time. This avoids
+ * the race condition where content.js executes before the other scripts
+ * have finished registering their functions on the global namespace.
  */
 
 (() => {
   "use strict";
-
-  const SA = window.__SkoolAutomation;
-
-  // ── Config ─────────────────────────────────────────────────────
-  const PAGE_SETTLE_MAX_MS = 8000;   // max wait for SPA page transition
-  const PAGE_SETTLE_POLL_MS = 300;   // poll interval during settle
-  const POST_CLICK_DELAY_MS = 1500;  // delay after clicking next lesson
 
   // ══════════════════════════════════════════════════════════════
   //  1. Inject Floating Button
@@ -62,7 +54,6 @@
 
     btn.addEventListener("click", onRunClicked);
     document.body.appendChild(btn);
-    console.log("[Automation] ✅ Floating button injected.");
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -70,133 +61,67 @@
   // ══════════════════════════════════════════════════════════════
 
   async function onRunClicked() {
-    // ── Prompt for inputs ────────────────────────────────────────
     const prefix = prompt("Enter a File Prefix Name (e.g. Hermes):");
-    if (!prefix) {
-      console.log("[Automation] ❌ Cancelled — no prefix provided.");
-      return;
-    }
+    if (!prefix) return;
 
     const pagesRaw = prompt("Enter the Number of Pages to process:");
     const totalPages = parseInt(pagesRaw, 10);
-    if (isNaN(totalPages) || totalPages < 1) {
-      console.log("[Automation] ❌ Invalid page count.");
-      return;
-    }
+    if (isNaN(totalPages) || totalPages < 1) return;
 
-    console.log(
-      `[Automation] 🚀 Starting — Prefix: "${prefix}" | Pages: ${totalPages}`
-    );
-
-    // ── Main processing loop ─────────────────────────────────────
     for (let i = 1; i <= totalPages; i++) {
       const fileName = `${prefix}_Lesson_${i}`;
-      console.log(
-        `\n[Automation] ──── Page ${i} of ${totalPages} ────`
-      );
 
-      // Step B: Detect the player
-      const playerType = await SA.detectPlayer();
-
-      // Step C: Route to the appropriate handler
-      if (playerType === "mux") {
-        SA.handleMux(fileName);
-      } else if (playerType === "youtube") {
-        SA.handleYouTube(fileName);
-      } else if (playerType === "loom") {
-        SA.handleLoom(fileName);
-      } else {
-        console.warn(
-          `[Automation] ⚠️ No player detected on page ${i}. Skipping handler.`
-        );
+      // ── Lazy lookup — safe even if scripts registered milliseconds apart
+      const SA = window.__SkoolAutomation;
+      if (!SA || typeof SA.detectPlayer !== "function") {
+        console.error("[Automation] window.__SkoolAutomation not ready. Reload the page.");
+        break;
       }
 
-      // Step D: Navigate to the next page (skip on last iteration)
+      // Detect — returns { name, link }
+      const { name, link } = await SA.detectPlayer();
+
+      // Route to the correct styled handler
+      const n = name.toLowerCase();
+      if (n.includes("youtube")) {
+        SA.handleYouTube(fileName, link);
+      } else if (n.includes("loom")) {
+        SA.handleLoom(fileName, link);
+      } else if (n.includes("mux")) {
+        SA.handleMux(fileName, link);
+      }
+      // UNKNOWN: no output — console stays clean
+
+      // Navigate (skip on last page)
       if (i < totalPages) {
-        const navigated = await navigateToNextLesson();
-        if (!navigated) {
-          console.error(
-            `[Automation] ❌ Could not navigate to page ${i + 1}. Stopping.`
-          );
-          break;
-        }
+        const ok = await navigateToNextLesson();
+        if (!ok) break;
       }
     }
-
-    console.log("[Automation] 🏁 All pages processed. Done.");
   }
 
   // ══════════════════════════════════════════════════════════════
   //  3. Skool Sidebar Navigation
   // ══════════════════════════════════════════════════════════════
 
-  /**
-   * Navigate to the next lesson using Skool's sidebar.
-   *
-   * Detection strategy:
-   *   1. Query all lesson rows via the known Skool class `.sc-4fca386d-6`.
-   *   2. Find the active one by its highlighted background colour
-   *      (rgb(248, 212, 129)) or aria-selected="true".
-   *   3. Click the next row.
-   *   4. Hard-sleep 4 s — enough for React to finish its route transition
-   *      and lazy-load the new lesson content.
-   *
-   * @returns {Promise<boolean>} true if a click was fired, false otherwise.
-   */
   async function navigateToNextLesson() {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-    // Step 1: All sidebar lesson rows
-    const lessons = Array.from(
-      document.querySelectorAll(".sc-4fca386d-6")
-    );
+    const lessons = Array.from(document.querySelectorAll(".sc-4fca386d-6"));
+    if (lessons.length === 0) return false;
 
-    if (lessons.length === 0) {
-      console.warn(
-        "[Navigation] ⚠️ No sidebar lesson rows (.sc-4fca386d-6) found."
-      );
-      return false;
-    }
-
-    console.log(`[Navigation] 📋 ${lessons.length} sidebar rows found.`);
-
-    // Step 2: Find the currently active lesson
     const currentIndex = lessons.findIndex((el) => {
       const bg = window.getComputedStyle(el).backgroundColor;
-      const isHighlighted = bg === "rgb(248, 212, 129)";
-      const isAriaSelected = el.getAttribute("aria-selected") === "true";
-      return isHighlighted || isAriaSelected;
+      return (
+        bg === "rgb(248, 212, 129)" ||
+        el.getAttribute("aria-selected") === "true"
+      );
     });
 
-    if (currentIndex === -1) {
-      console.warn(
-        "[Navigation] ⚠️ Cannot find the active lesson row. " +
-        "(No yellow background or aria-selected=true found.)"
-      );
-      return false;
-    }
+    if (currentIndex === -1 || currentIndex >= lessons.length - 1) return false;
 
-    console.log(
-      `[Navigation] 📍 Active lesson index: ${currentIndex} / ${lessons.length - 1}`
-    );
-
-    if (currentIndex >= lessons.length - 1) {
-      console.warn("[Navigation] ⚠️ Already at the last lesson.");
-      return false;
-    }
-
-    // Step 3: Click the next lesson row
-    const nextLesson = lessons[currentIndex + 1];
-    console.log(
-      `[Navigation] 🔗 Clicking next lesson (index ${currentIndex + 1})…`
-    );
-    nextLesson.click();
-
-    // Step 4: Hard sleep — let the SPA route transition and lazy-load
-    console.log("[Navigation] ⏳ Waiting 4 s for SPA to load new lesson…");
+    lessons[currentIndex + 1].click();
     await sleep(4000);
-    console.log("[Navigation] ✅ Hard sleep done — proceeding to detection.");
-
     return true;
   }
 
