@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Skool Video Automation",
+  "version": "1.0.0",
+  "description": "Detects video players on Skool pages and automates navigation through lessons.",
+  "permissions": ["activeTab"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": [
+        "detectors.js",
+        "mux.js",
+        "youtube.js",
+        "loom.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {}
+}
